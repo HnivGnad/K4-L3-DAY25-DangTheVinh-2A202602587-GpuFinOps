@@ -6,7 +6,7 @@ from __future__ import annotations
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 from missions._common import load_csv, num, catalog_by_type
-from finops import pricing
+from finops import pricing, extensions
 
 DAYS = 30
 
@@ -31,7 +31,8 @@ def run(verbose: bool = True) -> dict:
             sim = pricing.spot_checkpoint_cost(gpu_hours, num(c["spot_hr"]), od)
             opt_cost = sim["spot_cost"]
         elif tier == "reserved":
-            opt_cost = gpu_hours * num(c["reserved_3yr_hr"])
+            # A reserved GPU is billed throughout the projected month, even idle.
+            opt_cost = 24 * DAYS * ngpu * num(c["reserved_3yr_hr"])
         else:
             opt_cost = on_demand_cost
 
@@ -42,6 +43,7 @@ def run(verbose: bool = True) -> dict:
 
     savings = on_demand_monthly - optimized_monthly
     savings_pct = savings / on_demand_monthly * 100 if on_demand_monthly else 0.0
+    carbon = extensions.carbon_schedule(jobs, cat)
 
     if verbose:
         print("== M3 Purchasing Strategy ==")
@@ -50,9 +52,13 @@ def run(verbose: bool = True) -> dict:
         for r in recs:
             print(f"{r['job_id']:18}{r['gpu_type']:7}{r['tier']:11}${r['on_demand']:>11,}${r['optimized']:>11,}")
         print(f"\nmonthly: on-demand ${on_demand_monthly:,.0f} -> optimized ${optimized_monthly:,.0f}  ({savings_pct:.1f}% saved)")
+        print(f"Carbon-aware scenario (actual job days): {carbon['energy_wh']/1000:.2f} kWh; "
+              f"move to {carbon['cleanest_region']} saves {carbon['saved_carbon_g']/1000:.2f} kgCO2e "
+              f"and ${carbon['saved_electricity_usd']:.2f} electricity")
 
     return {"recommendations": recs, "on_demand_monthly": round(on_demand_monthly),
-            "optimized_monthly": round(optimized_monthly), "savings_pct": round(savings_pct, 1)}
+            "optimized_monthly": round(optimized_monthly), "savings_pct": round(savings_pct, 1),
+            "carbon": carbon}
 
 
 if __name__ == "__main__":
